@@ -248,8 +248,23 @@ class AboutUs(models.Model):
 
 
 
+class AccountingService(models.Model):
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(unique=True)
+    description = models.TextField()
+    price = models.PositiveIntegerField()
+    is_popular = models.BooleanField(default=False)
+    category = models.ForeignKey(ReportType, on_delete=models.CASCADE, related_name='services')
 
+    def __str__(self):
+        return self.title
 
+class ServiceItem(models.Model):
+    service = models.ForeignKey(AccountingService, on_delete=models.CASCADE, related_name='items')
+    name = models.CharField(max_length=255)
+
+    def __str__(self):
+        return f"{self.service.title} - {self.name}"
 
 
 

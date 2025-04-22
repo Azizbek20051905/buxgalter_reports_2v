@@ -177,7 +177,7 @@ STATICFILES_FINDERS = [
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'api.User'
-FRONTEND_URL = "https://bugalter-jet.vercel.app"
+# FRONTEND_URL = "https://bugalter-jet.vercel.app"
 
 from datetime import timedelta
 

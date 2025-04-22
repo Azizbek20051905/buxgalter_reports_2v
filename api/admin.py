@@ -1,7 +1,10 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin, UserAdmin
 # Attachment va Task ni ham import qiling
-from .models import User, Accountant, ReportType, Report, ReportComment, Message, PaymentCard, AboutUs, Attachment, Task
+from .models import (User, Accountant, ReportType,
+                     Report, ReportComment, Message,
+                     PaymentCard, AboutUs, Attachment, 
+                     Task, AccountingService, ServiceItem)
 from django.utils.html import format_html # Linklar uchun
 from django.urls import reverse # Linklar uchun
 
@@ -155,6 +158,19 @@ class TaskAdmin(admin.ModelAdmin):
         return "Yo'q"
     report_link.short_description = 'Hisobot'
 
+class ServiceItemInline(admin.TabularInline):
+    model = ServiceItem
+    extra = 1
+
+@admin.register(AccountingService)
+class AccountingServiceAdmin(admin.ModelAdmin):
+    list_display = ("title", "price", "category", "is_popular")
+    prepopulated_fields = {"slug": ("title",)}
+    inlines = [ServiceItemInline]
+
+@admin.register(ServiceItem)
+class ServiceItemAdmin(admin.ModelAdmin):
+    list_display = ("service", "name")
 
 # Modellarni ro‘yxatdan o‘tkazish
 admin.site.register(User, UserAdmin)

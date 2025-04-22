@@ -16,6 +16,7 @@ router.register(r'admin-users', UserAdminViewSet, basename='admin-users') # Admi
 router.register(r'aboutus', AboutUsViewSet, basename='aboutus') # About Us (Admin/ReadOnly)
 router.register(r'chats', ChatViewSet, basename='chats') # Chatlar ro'yxati (ReadOnly)
 router.register(r'admin-chats', AdminChatViewSet, basename='admin-chats') # Admin uchun chatlar
+router.register(r'services', AccountingServiceViewSet) # Xizmatlar
 
 # Hisobotlar uchun nested router (Attachments va Comments)
 reports_router = routers.NestedDefaultRouter(router, r'reports', lookup='report')

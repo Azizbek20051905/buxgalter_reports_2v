@@ -515,6 +515,19 @@ class MessageSerializer(serializers.ModelSerializer):
     def get_to_user(self, obj):
         return MiniUserSerializer(obj.recipient).data # Minimal ma'lumot
 
+class ServiceItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ServiceItem
+        fields = ['id', 'name']
+
+class AccountingServiceSerializer(serializers.ModelSerializer):
+    items = ServiceItemSerializer(many=True, read_only=True)
+    category = serializers.StringRelatedField()
+
+    class Meta:
+        model = AccountingService
+        fields = ['id', 'title', 'slug', 'description', 'price', 'is_popular', 'category', 'items']
+
 
 class PaymentCardSerializer(serializers.ModelSerializer):
     # ... (mavjud kod)

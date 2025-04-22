@@ -27,7 +27,6 @@ from .permissions import (
     CanManageReport, CanManageTask, CanManageAttachment, CanManageComment
 )
 
-
 User = get_user_model()
 
 
@@ -668,3 +667,9 @@ class UserAdminViewSet(viewsets.ModelViewSet):
 
     # Create, Update, Destroy metodlari standart ModelViewSet da mavjud
     # Zarur bo'lsa override qilish mumkin (masalan, parol o'rnatish uchun create da)
+
+class AccountingServiceViewSet(viewsets.ModelViewSet):
+    queryset = AccountingService.objects.all()
+    serializer_class = AccountingServiceSerializer
+    # permission_classes = [IsAdminUser]
+
