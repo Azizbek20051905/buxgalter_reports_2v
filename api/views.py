@@ -1,3 +1,4 @@
+from datetime import timedelta
 import random
 from decimal import Decimal # Qo'shildi
 from django.conf import settings
@@ -9,17 +10,23 @@ from django.contrib.auth.tokens import default_token_generator # Qo'shildi
 from django.utils import timezone # Qo'shildi
 from django.shortcuts import get_object_or_404 # Qo'shildi
 from django.db.models import Q, Count # Q va Count qo'shildi
-from rest_framework import generics, status, viewsets, permissions
+from rest_framework import generics, status, viewsets, permissions, views, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.permissions import AllowAny, IsAuthenticated # IsAdminUser o'rniga custom
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.exceptions import PermissionDenied, NotFound # Qo'shildi
+from django.db.models import Sum, Count, F, DecimalField
+from django.db.models.functions import TruncMonth, TruncYear, Coalesce
 
 # Serializerlarni va Modellarni import qilish
+from django_filters.rest_framework import DjangoFilterBackend # DjangoFilterBackend uchun
+from .filters import UserFilter, PaymentFilter, PaymentModelFilter  # Yangi filter klassi
+from dateutil.relativedelta import relativedelta
 from .serializers import *
 from .models import *
+import calendar
 # Yangi ruxsatnomalarni import qilish
 from .permissions import (
     IsAdminUser, IsAccountantUser, IsClientUser,
@@ -673,3 +680,390 @@ class AccountingServiceViewSet(viewsets.ModelViewSet):
     serializer_class = AccountingServiceSerializer
     # permission_classes = [IsAdminUser]
 
+
+class DashboardStatsView(views.APIView): # APIView dan meros olamiz
+    """
+    Foydalanuvchi roli asosida dashboard uchun statistikani qaytaradi.
+    """
+    permission_classes = [IsAuthenticated] # Faqat login qilganlar ko'ra oladi
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+
+        # --- Hisobotlarni (Buyurtmalarni) rolga qarab filterlash ---
+        base_report_queryset = Report.objects.none() # Boshlang'ich bo'sh queryset
+        if user.role == 'mijoz':
+            base_report_queryset = Report.objects.filter(client=user)
+        elif user.role == 'buxgalter':
+            base_report_queryset = Report.objects.filter(accountant=user)
+        elif user.role == 'admin':
+            base_report_queryset = Report.objects.all() # Admin hamma hisobotni ko'radi
+
+        # --- Statistikani hisoblash ---
+
+        # 1. Faol buyurtmalar (Report statuslari: 'in_progress', 'in_review')
+        # Rasmda "Jarayonda" va "Kutilmoqda" bor. Modellardagi 'in_progress' va 'in_review' ga mos keladi deb taxmin qilamiz.
+        faol_statuslar = ['in_progress', 'in_review']
+        faol_buyurtmalar_soni = base_report_queryset.filter(status__in=faol_statuslar).count()
+        faol_buyurtmalar_oxirgi_30_kun = base_report_queryset.filter(
+            status__in=faol_statuslar,
+            updated_at__gte=thirty_days_ago # Status oxirgi marta shu vaqtda o'zgarganlar
+        ).count()
+
+        # 2. Jami tayyor hisobotlar (Report statusi: 'approved')
+        # Rasmda "Tugallangan" bor, modelda 'approved' ga mos keladi.
+        tayyor_status = 'approved'
+        jami_tayyor_hisobotlar_soni = base_report_queryset.filter(status=tayyor_status).count()
+        tayyor_hisobotlar_oxirgi_30_kun = base_report_queryset.filter(
+            status=tayyor_status,
+            updated_at__gte=thirty_days_ago # Tasdiqlangan sana (updated_at orqali)
+        ).count()
+
+        # 3. O'qilmagan xabarlar (Message modeli)
+        unread_messages_qs = Message.objects.filter(recipient=user, read=False)
+        oqilmagan_xabarlar_soni = unread_messages_qs.count()
+
+        # "N ta buxgalterdan" ma'lumotini olish (hozircha oddiyroq)
+        # Agar admin bo'lmasa, faqat buxgalterlardan kelgan xabarlarni sanash mumkin
+        oqilmagan_xabarlar_info = ""
+        if oqilmagan_xabarlar_soni > 0:
+            senders_count = unread_messages_qs.values('sender__role').annotate(count=Count('sender')).order_by()
+            sender_info_parts = []
+            for item in senders_count:
+                # Rol nomini olish (agar kerak bo'lsa)
+                # role_display = dict(User.ROLE_CHOICES).get(item['sender__role'], item['sender__role'])
+                # sender_info_parts.append(f"{item['count']} ta {role_display}")
+
+                # Rasmga yaqinroq qilish uchun:
+                if item['sender__role'] == 'buxgalter':
+                    sender_info_parts.append(f"{item['count']} ta buxgalterdan")
+                elif item['sender__role'] == 'admin':
+                    sender_info_parts.append(f"{item['count']} ta admindan")
+                elif item['sender__role'] == 'mijoz':
+                    sender_info_parts.append(f"{item['count']} ta mijozdan")
+            oqilmagan_xabarlar_info = ", ".join(sender_info_parts) if sender_info_parts else ""
+
+
+        # 4. Balans
+        # Sizning kodingizda balans uchun alohida model/maydon ko'rinmayapti.
+        # Hozircha rasmda ko'rsatilgan statik qiymatni qaytaramiz.
+        # Haqiqiy implementatsiya uchun User modelini kengaytirish yoki UserProfile yaratish kerak.
+        balans = Decimal('120000.00') # Rasmdeki qiymat, Decimal sifatida
+
+        # --- Ma'lumotlarni tayyorlash ---
+        data = {
+            'faol_buyurtmalar_soni': faol_buyurtmalar_soni,
+            'jami_tayyor_hisobotlar_soni': jami_tayyor_hisobotlar_soni,
+            'oqilmagan_xabarlar_soni': oqilmagan_xabarlar_soni,
+            'balans': balans,
+            'faol_buyurtmalar_oxirgi_30_kun': faol_buyurtmalar_oxirgi_30_kun, # Frontend buni "+N" qilib ko'rsatadi
+            'tayyor_hisobotlar_oxirgi_30_kun': tayyor_hisobotlar_oxirgi_30_kun, # Frontend buni "+N" qilib ko'rsatadi
+            'oqilmagan_xabarlar_info': oqilmagan_xabarlar_info,
+        }
+
+        # Serializer orqali javobni formatlash
+        serializer = DashboardStatsSerializer(data=data)
+        serializer.is_valid(raise_exception=True) # Validatsiya
+
+        return Response(serializer.validated_data, status=status.HTTP_200_OK)
+
+
+# --- Mavjud UserAdminViewSet ni YANGILASH ---
+class UserAdminViewSet(viewsets.ModelViewSet):
+    """
+    Admin uchun foydalanuvchilarni boshqarish (CRUD, Tasdiqlash/Rad etish).
+    """
+    queryset = User.objects.all().order_by('-date_joined') # Yangi qo'shilganlar tepada
+    permission_classes = [IsAdminUser] # Faqat Admin
+
+    # Filter va Search backendlarini qo'shish
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_class = UserFilter # Filterlash uchun klass
+    search_fields = ['full_name', 'email'] # Qidirish uchun maydonlar (?search=...)
+
+    def get_serializer_class(self):
+        # Ro'yxatni ko'rish uchun maxsus serializer
+        if self.action == 'list':
+            return AdminUserListSerializer
+        # Boshqa actionlar (retrieve, create, update) uchun standart UserSerializer (yoki kerak bo'lsa boshqasi)
+        # Masalan, yaratishda SignupSerializer dan foydalanish mumkin
+        # if self.action == 'create':
+        #     return SignupSerializer # Admin ham shu orqali yaratishi mumkin
+        elif self.action in ['update', 'partial_update']:
+             return UserUpdateSerializer # Profilni tahrirlash uchun
+        return UserSerializer # Default (retrieve, create)
+
+    # --- Foydalanuvchini TASDIQLASH uchun custom action ---
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve_user(self, request, pk=None):
+        """
+        Foydalanuvchini tasdiqlaydi (is_active=True qiladi).
+        """
+        user = self.get_object() # Foydalanuvchini olish (pk orqali)
+        if not user.is_active:
+            user.is_active = True
+            user.save(update_fields=['is_active'])
+            # Bildirishnoma yuborish (ixtiyoriy)
+            # send_mail(...)
+            serializer = AdminUserListSerializer(user, context={'request': request}) # Yangilangan ma'lumotni qaytarish
+            return Response({"message": "Foydalanuvchi muvaffaqiyatli tasdiqlandi.", "user": serializer.data}, status=status.HTTP_200_OK)
+        else:
+            return Response({"message": "Foydalanuvchi allaqachon faol."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # --- Foydalanuvchini RAD ETISH/DEAKTIVLASHTIRISH uchun custom action ---
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject_user(self, request, pk=None):
+        """
+        Foydalanuvchini rad etadi (is_active=False qiladi).
+        Bu aslida deaktivatsiya. Agar butunlay o'chirish kerak bo'lsa, DELETE ishlatiladi.
+        """
+        user = self.get_object()
+        if user.is_active:
+            user.is_active = False
+            user.save(update_fields=['is_active'])
+            # Bildirishnoma yuborish (ixtiyoriy)
+            serializer = AdminUserListSerializer(user, context={'request': request})
+            return Response({"message": "Foydalanuvchi muvaffaqiyatli deaktiv qilindi.", "user": serializer.data}, status=status.HTTP_200_OK)
+        else:
+            # Agar allaqachon nofaol bo'lsa, balki xato qaytarish kerak emasdir
+             serializer = AdminUserListSerializer(user, context={'request': request})
+             return Response({"message": "Foydalanuvchi allaqachon nofaol edi.", "user": serializer.data}, status=status.HTTP_200_OK)
+            # Yoki: return Response({"message": "Foydalanuvchi allaqachon nofaol."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # perform_destroy (DELETE) metodi ModelViewSet da mavjud. Agar "Rad etish" o'chirish bo'lsa,
+    # frontend DELETE so'rovini yuborishi kerak. Agar deaktivatsiya bo'lsa, reject_user ishlaydi.
+
+
+# --- YANGI Statistika View ---
+class UserManagementStatsView(views.APIView):
+    """
+    Foydalanuvchilarni boshqarish sahifasi uchun statistikani qaytaradi.
+    """
+    permission_classes = [IsAdminUser] # Faqat Admin
+
+    def get(self, request, *args, **kwargs):
+        # Barcha aktiv foydalanuvchilar sonini rol bo'yicha hisoblash
+        active_users_by_role = User.objects.filter(is_active=True)\
+                                     .values('role')\
+                                     .annotate(count=Count('id'))\
+                                     .order_by('role')
+
+        mijozlar_soni = 0
+        buxgalterlar_soni = 0
+        for item in active_users_by_role:
+            if item['role'] == 'mijoz':
+                mijozlar_soni = item['count']
+            elif item['role'] == 'buxgalter':
+                buxgalterlar_soni = item['count']
+            # Agar boshqa aktiv rollar bo'lsa, ularni ham hisoblash mumkin
+
+        # Yangi (tasdiqlanmagan) foydalanuvchilar soni
+        yangi_foydalanuvchilar_soni = User.objects.filter(is_active=False).count()
+
+        data = {
+            'mijozlar_soni': mijozlar_soni,
+            'buxgalterlar_soni': buxgalterlar_soni,
+            'yangi_foydalanuvchilar_soni': yangi_foydalanuvchilar_soni,
+        }
+
+        serializer = UserManagementStatsSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.validated_data, status=status.HTTP_200_OK)
+
+
+class PaymentViewSet(viewsets.ModelViewSet): # CRUD uchun ModelViewSet
+    """
+    To'lovlarni ko'rish va boshqarish uchun API endpoint.
+    """
+    serializer_class = PaymentSerializer
+    permission_classes = [IsAuthenticated] # Asosiy ruxsatnoma
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter] # Filter va Search
+    filterset_class = PaymentModelFilter # Yangi filter
+    search_fields = [ # Qidirish uchun
+        'client__full_name', 'client__email',
+        'accountant__full_name', 'accountant__email',
+        'report__title', 'report__category__name',
+        'transaction_id'
+    ]
+    # pagination_class = ... # Agar kerak bo'lsa
+
+    def get_queryset(self):
+        user = self.request.user
+        if getattr(self, 'swagger_fake_view', False):
+            return Payment.objects.none()
+
+        if user.role == 'admin':
+            return Payment.objects.select_related('client', 'accountant', 'report', 'report__category').all()
+        elif user.role == 'buxgalter':
+            # Buxgalter o'zi qabul qilgan yoki o'ziga tegishli hisobotlar uchun qilingan to'lovlar
+            return Payment.objects.filter(
+                Q(accountant=user) | Q(report__accountant=user)
+            ).select_related('client', 'accountant', 'report', 'report__category').distinct()
+        elif user.role == 'mijoz':
+            # Mijoz faqat o'zi qilgan to'lovlarni ko'radi
+             return Payment.objects.filter(client=user).select_related('client', 'accountant', 'report', 'report__category')
+        else:
+            return Payment.objects.none()
+
+    def get_permissions(self):
+        # Qo'lda to'lov yaratish/o'zgartirish/o'chirish faqat Admin uchun (hozircha)
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsAdminUser()]
+        # Ro'yxatni ko'rish hamma (login qilgan) uchun (get_queryset filterlaydi)
+        return [IsAuthenticated()]
+
+    # perform_create, perform_update ni override qilish mumkin (agar maxsus logika kerak bo'lsa)
+
+
+# --- O'ZGARTIRILGAN IncomeSummaryDynamicsView ---
+class IncomeSummaryDynamicsView(views.APIView):
+    """
+    Daromadlar sahifasi uchun umumiy statistika va oylik dinamikani
+    YANGI Payment modelidan oladi.
+    """
+    permission_classes = [IsAuthenticated] # Yoki IsAdminUser, IsAccountantUser
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        now = timezone.now()
+        # --- Sana hisob-kitoblari (o'zgarmaydi) ---
+        current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        prev_month_start = current_month_start - relativedelta(months=1)
+        prev_month_end = current_month_start - relativedelta(microseconds=1)
+        current_year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        prev_year_start = current_year_start - relativedelta(years=1)
+        prev_year_end = current_year_start - relativedelta(microseconds=1)
+
+        # --- Rolga qarab asosiy Payment queryset ---
+        base_payment_qs = Payment.objects.none()
+        if user.role == 'admin':
+            base_payment_qs = Payment.objects.all()
+        elif user.role == 'buxgalter':
+            # Buxgalter qabul qilgan yoki unga tegishli hisobotlar uchun to'lovlar
+            base_payment_qs = Payment.objects.filter(
+                Q(accountant=user) | Q(report__accountant=user)
+            ).distinct()
+        elif user.role == 'mijoz':
+             raise PermissionDenied("Mijozlar uchun bu sahifa mavjud emas.")
+        else:
+             raise PermissionDenied("Noma'lum rol.")
+
+        # --- Statistikani YANGI Payment modelidan hisoblash ---
+        # Faqat 'completed' statusdagilar haqiqiy daromad
+        completed_qs = base_payment_qs.filter(status='completed')
+
+        # 1. Oylik daromad
+        current_month_income = completed_qs.filter(
+            payment_date__gte=current_month_start
+        ).aggregate(
+            total=Coalesce(Sum('amount'), Decimal(0), output_field=DecimalField())
+        )['total']
+
+        prev_month_income = completed_qs.filter(
+            payment_date__range=(prev_month_start, prev_month_end)
+        ).aggregate(
+            total=Coalesce(Sum('amount'), Decimal(0), output_field=DecimalField())
+        )['total']
+
+        oylik_foiz_ozgarish = 0.0
+        if prev_month_income > 0:
+            oylik_foiz_ozgarish = float(((current_month_income - prev_month_income) / prev_month_income) * 100)
+
+        # 2. Yillik daromad
+        current_year_income = completed_qs.filter(
+            payment_date__gte=current_year_start
+        ).aggregate(
+            total=Coalesce(Sum('amount'), Decimal(0), output_field=DecimalField())
+        )['total']
+
+        prev_year_income = completed_qs.filter(
+            payment_date__range=(prev_year_start, prev_year_end)
+        ).aggregate(
+            total=Coalesce(Sum('amount'), Decimal(0), output_field=DecimalField())
+        )['total']
+
+        yillik_foiz_ozgarish = 0.0
+        if prev_year_income > 0:
+            yillik_foiz_ozgarish = float(((current_year_income - prev_year_income) / prev_year_income) * 100)
+
+        # 3. Kutilayotgan daromad (Endi 'pending' statusdagi Paymentlardan)
+        pending_qs = base_payment_qs.filter(status='pending')
+        pending_aggregation = pending_qs.aggregate(
+            total_sum=Coalesce(Sum('amount'), Decimal(0), output_field=DecimalField()),
+            total_count=Count('id')
+        )
+        kutilayotgan_daromad_summa = pending_aggregation['total_sum']
+        kutilayotgan_daromad_soni = pending_aggregation['total_count']
+
+        # --- Daromad Dinamikasi ('completed' Paymentlardan) ---
+        monthly_income_data = completed_qs.filter(
+            payment_date__gte=current_year_start
+        ).annotate(
+            month=TruncMonth('payment_date')
+        ).values('month').annotate(
+            monthly_total=Sum('amount')
+        ).order_by('month')
+
+        # Dinamikani formatlash (o'zgarmaydi)
+        oy_nomlari_uz = {1: 'Yan', 2: 'Fev', 3: 'Mar', 4: 'Apr', 5: 'May', 6: 'Iyun', 7: 'Iyul', 8: 'Avg', 9: 'Sen', 10: 'Okt', 11: 'Noy', 12: 'Dek'}
+        dynamics_data = {oy_nomlari_uz[i]: Decimal(0) for i in range(1, 13)}
+        for item in monthly_income_data:
+            month_num = item['month'].month
+            if month_num in oy_nomlari_uz:
+                dynamics_data[oy_nomlari_uz[month_num]] = item['monthly_total'] or Decimal(0)
+
+        # --- Javobni tayyorlash (o'zgarmaydi) ---
+        stats_data = {
+            'oylik_daromad': current_month_income,
+            'oylik_foiz_ozgarish': round(oylik_foiz_ozgarish, 2),
+            'yillik_daromad': current_year_income,
+            'yillik_foiz_ozgarish': round(yillik_foiz_ozgarish, 2),
+            'kutilayotgan_daromad_summa': kutilayotgan_daromad_summa,
+            'kutilayotgan_daromad_soni': kutilayotgan_daromad_soni,
+        }
+        stats_serializer = IncomeStatsSerializer(data=stats_data)
+        stats_serializer.is_valid(raise_exception=True)
+
+        dynamics_list_data = [{'month': k, 'amount': v} for k, v in dynamics_data.items()]
+
+        return Response({
+            "statistics": stats_serializer.validated_data,
+            "dynamics": dynamics_list_data
+        }, status=status.HTTP_200_OK)
+
+
+# --- YANGI To'lovlar Tarixi ViewSet ---
+# class PaymentHistoryViewSet(viewsets.ReadOnlyModelViewSet):
+#     """
+#     To'lovlar tarixini ko'rsatish uchun ViewSet (Report modeliga asoslangan).
+#     Filterlash: ?status=completed yoki ?status=pending
+#     """
+#     serializer_class = PaymentHistorySerializer
+#     permission_classes = [IsAuthenticated] # Yoki IsAdminUser, IsAccountantUser
+#     filter_backends = [DjangoFilterBackend]
+#     filterset_class = PaymentFilter # Yuqorida yaratilgan filter
+#     # Pagination DRF sozlamalaridan keladi (agar sozlanmagan bo'lsa, qo'shish kerak)
+#     # pagination_class = StandardResultsSetPagination # Masalan
+
+#     def get_queryset(self):
+#         user = self.request.user
+#         # --- Swagger schema generation uchun tekshiruv ---
+#         if getattr(self, 'swagger_fake_view', False):
+#             return Report.objects.none()
+
+#         # Rolga qarab asosiy querysetni aniqlash
+#         if user.role == 'admin':
+#             # Admin barcha 'to'lov'larni ko'radi (tasdiqlangan va kutilayotgan)
+#             # Filter class statuslarni to'g'ri filterlaydi
+#             return Report.objects.select_related('client', 'category').all().order_by('-created_at')
+#         elif user.role == 'buxgalter':
+#             # Buxgalter o'ziga tegishli (tayinlangan) hisobotlarga aloqador to'lovlarni ko'radi
+#              return Report.objects.filter(accountant=user).select_related('client', 'category').order_by('-created_at')
+#         elif user.role == 'mijoz':
+#              # Mijoz bu yerga kira olmasligi kerak (yuqoridagi viewda tekshirilgan)
+#              # Agar kerak bo'lsa, o'z hisobotlarini ko'rishi mumkin:
+#              # return Report.objects.filter(client=user).select_related('client', 'category').order_by('-created_at')
+#              return Report.objects.none() # Mijoz uchun bo'sh qaytarish
+#         else:
+#              return Report.objects.none() # Boshqa rollar uchun bo'sh

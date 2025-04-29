@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accounting Web API Dokumentatsiyasi</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        .endpoint {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+        }
+        .request {
+            background: #e8f4f8;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 5px 0;
+        }
+        .response {
+            background: #e8f8e8;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 5px 0;
+        }
+        code {
+            background: #f1f1f1;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        .note {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Accounting Web API Dokumentatsiyasi 🌐</h1>
+
+    <h2>1. Autentifikatsiya Endpointlari 🔐</h2>
+
+    <div class="endpoint">
+        <h3>Ro'yxatdan o'tish (POST /api/auth/signup/)</h3>
+        <div class="request">
+            <strong>Request body:</strong>
+            <pre><code>{
+    "email": "example@mail.com",
+    "password": "password123",
+    "full_name": "Ism Familiya",
+    "role": "mijoz" // "mijoz", "buxgalter" yoki "admin"
+}</code></pre>
+        </div>
+        <div class="response">
+            <strong>Response:</strong> Foydalanuvchi ma'lumotlari
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <h3>Login (POST /api/auth/login/)</h3>
+        <div class="request">
+            <strong>Request body:</strong>
+            <pre><code>{
+    "email": "example@mail.com",
+    "password": "password123"
+}</code></pre>
+        </div>
+        <div class="response">
+            <strong>Response:</strong>
+            <pre><code>{
+    "access": "token...",
+    "refresh": "token...",
+    "role": "mijoz",
+    "full_name": "Ism Familiya"
+}</code></pre>
+        </div>
+    </div>
+
+    <h2>2. Profil Endpointlari 👤</h2>
+
+    <div class="endpoint">
+        <h3>Profil ma'lumotlarini olish (GET /api/auth/profile/)</h3>
+        <div class="note">
+            - Foydalanuvchining barcha ma'lumotlarini qaytaradi<br>
+            - Token talab qilinadi
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <h3>Profilni yangilash (PUT /api/auth/profile/edit/)</h3>
+        <div class="request">
+            <strong>Request body:</strong>
+            <pre><code>{
+    "full_name": "Ism Familiya",
+    "phone": "+998901234567",
+    "avatar": "file",
+    "company_name": "Kompaniya nomi",
+    "address": "Manzil"
+}</code></pre>
+        </div>
+        <div class="note">
+            - Profil ma'lumotlarini yangilash<br>
+            - Rasm yuklash mumkin<br>
+            - Token talab qilinadi
+        </div>
+    </div>
+
+    <h2>3. Hisobotlar Endpointlari 📊</h2>
+
+    <div class="endpoint">
+        <h3>Hisobotlar ro'yxati (GET /api/reports/)</h3>
+        <div class="note">
+            - Mijoz: o'zining hisobotlarini ko'radi<br>
+            - Buxgalter: o'ziga biriktirilgan hisobotlarni ko'radi<br>
+            - Admin: barcha hisobotlarni ko'radi
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <h3>Yangi hisobot yaratish (POST /api/reports/)</h3>
+        <div class="request">
+            <strong>Request body:</strong>
+            <pre><code>{
+    "title": "Hisobot nomi",
+    "description": "Batafsil ma'lumot",
+    "category": 1,
+    "files": [file1, file2],
+    "deadline": "2024-03-20"
+}</code></pre>
+        </div>
+    </div>
+
+    <h2>4. Vazifalar Endpointlari ✅</h2>
+
+    <div class="endpoint">
+        <h3>Vazifalar ro'yxati (GET /api/tasks/)</h3>
+        <div class="note">
+            - Mijoz: o'zining vazifalari<br>
+            - Buxgalter: o'ziga biriktirilgan vazifalar<br>
+            - Admin: barcha vazifalar
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <h3>Yangi vazifa yaratish (POST /api/tasks/)</h3>
+        <div class="request">
+            <strong>Request body:</strong>
+            <pre><code>{
+    "title": "Vazifa nomi",
+    "description": "Batafsil ma'lumot",
+    "deadline": "2024-03-20",
+    "priority": "high",
+    "report": 1,
+    "client": 1,
+    "accountant": 1
+}</code></pre>
+        </div>
+    </div>
+
+    <h2>5. Xabarlar Endpointlari 💬</h2>
+
+    <div class="endpoint">
+        <h3>Yangi xabar yuborish (POST /api/messages/)</h3>
+        <div class="request">
+            <strong>Request body:</strong>
+            <pre><code>{
+    "recipient": 1,
+    "content": "Xabar matni",
+    "attachments": [file1, file2]
+}</code></pre>
+        </div>
+    </div>
+
+    <h2>6. Xizmatlar Endpointlari 🛠️</h2>
+
+    <div class="endpoint">
+        <h3>Xizmatlar ro'yxati (GET /api/services/)</h3>
+        <div class="response">
+            <strong>Response:</strong>
+            <pre><code>{
+    "id": 1,
+    "name": "Xizmat nomi",
+    "description": "Xizmat haqida batafsil",
+    "price": 1000000,
+    "duration": "1 oy",
+    "features": ["Xususiyat 1", "Xususiyin 2"]
+}</code></pre>
+        </div>
+    </div>
+
+    <h2>7. To'lovlar Endpointlari 💰</h2>
+
+    <div class="endpoint">
+        <h3>To'lov kartasi qo'shish (POST /api/payment-cards/)</h3>
+        <div class="request">
+            <strong>Request body:</strong>
+            <pre><code>{
+    "card_number": "8600123456789012",
+    "expiry_date": "12/25",
+    "card_holder": "ISM FAMILIYA"
+}</code></pre>
+        </div>
+    </div>
+
+    <h2>8. Buxgalterlar Endpointlari 👨‍💼</h2>
+
+    <div class="endpoint">
+        <h3>Buxgalter tanlash (GET /api/accountants/)</h3>
+        <div class="response">
+            <strong>Response:</strong>
+            <pre><code>{
+    "id": 1,
+    "full_name": "Ism Familiya",
+    "experience": "5 yil",
+    "specialization": "Soliq hisobi",
+    "rating": 4.8,
+    "completed_reports": 150
+}</code></pre>
+        </div>
+    </div>
+
+    <h2>9. Statistika Endpointlari 📈</h2>
+
+    <div class="endpoint">
+        <h3>Hisobotlar statistikasi (GET /api/reports/statistics/)</h3>
+        <div class="request">
+            <strong>Query parameters:</strong>
+            <pre><code>{
+    "period": "month",
+    "status": "all",
+    "accountant_id": 1
+}</code></pre>
+        </div>
+    </div>
+
+    <h2>10. Parolni tiklash Endpointlari 🔑</h2>
+
+    <div class="endpoint">
+        <h3>Parolni tiklash so'rovi (POST /api/auth/password-reset/)</h3>
+        <div class="request">
+            <strong>Request body:</strong>
+            <pre><code>{
+    "email": "example@mail.com"
+}</code></pre>
+        </div>
+    </div>
+
+    <div class="endpoint">
+        <h3>Yangi parol o'rnatish (POST /api/auth/password-reset-confirm/)</h3>
+        <div class="request">
+            <strong>Request body:</strong>
+            <pre><code>{
+    "uid": "base64_uid",
+    "token": "token",
+    "new_password": "yangi_parol"
+}</code></pre>
+        </div>
+    </div>
+
+    <div class="note">
+        <h3>Muhim eslatmalar ⚠️</h3>
+        <ul>
+            <li>Barcha so'rovlar uchun <code>Authorization</code> headerida <code>Bearer {token}</code> bo'lishi kerak (login dan tashqari)</li>
+            <li>Fayllarni yuklashda <code>multipart/form-data</code> ishlatiladi</li>
+            <li>Xatolik bo'lganda API aniq xabar qaytaradi</li>
+            <li>Ruxsat bo'lmagan amallarda 403 Forbidden qaytariladi</li>
+            <li>Topilmagan resurslar uchun 404 Not Found qaytariladi</li>
+        </ul>
+    </div>
+</body>
+</html> 

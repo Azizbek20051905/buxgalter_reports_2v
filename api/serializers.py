@@ -7,6 +7,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import * # Barcha modellarni import qilish
+from django.utils.formats import date_format
 
 User = get_user_model()
 
@@ -506,7 +507,7 @@ class MessageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Message
-        fields = ['id', 'sender', 'from_user', 'recipient', 'to_user', 'message', 'created_at']
+        fields = ['id', 'sender', 'from_user', 'recipient', 'to_user', 'message', 'read', 'created_at']
         read_only_fields = ['id', 'created_at', 'from_user', 'to_user']
 
     def get_from_user(self, obj):
@@ -534,3 +535,162 @@ class PaymentCardSerializer(serializers.ModelSerializer):
     class Meta:
         model = PaymentCard
         fields = '__all__'
+
+
+class DashboardStatsSerializer(serializers.Serializer): # Nomini to'g'riladik
+    """
+    Foydalanuvchi dashboardi uchun statistik ma'lumotlar.
+    """
+    faol_buyurtmalar_soni = serializers.IntegerField()
+    jami_tayyor_hisobotlar_soni = serializers.IntegerField()
+    oqilmagan_xabarlar_soni = serializers.IntegerField()
+    balans = serializers.DecimalField(max_digits=15, decimal_places=2) # Balans uchun DecimalField
+
+    # Rasmga mos qo'shimcha ma'lumotlar
+    faol_buyurtmalar_oxirgi_30_kun = serializers.IntegerField(required=False)
+    tayyor_hisobotlar_oxirgi_30_kun = serializers.IntegerField(required=False)
+    oqilmagan_xabarlar_info = serializers.CharField(required=False, allow_blank=True)
+
+class AdminUserListSerializer(serializers.ModelSerializer):
+    """
+    Admin panelida foydalanuvchilar ro'yxatini ko'rsatish uchun serializer.
+    """
+    status_display = serializers.SerializerMethodField(read_only=True)
+    date_joined_display = serializers.SerializerMethodField(read_only=True)
+    # Agar rasmga o'xshatish kerak bo'lsa, image URL ni ham qo'shish mumkin
+    img_url = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'full_name', 'email', 'role', 'img_url', # Asosiy ma'lumotlar
+            'is_active', # Haqiqiy status
+            'status_display', # Ko'rsatish uchun status ("Faol", "Kutilmoqda")
+            'date_joined', # Original sana
+            'date_joined_display' # Ko'rsatish uchun sana ("YYYY-MM-DD")
+        ]
+        read_only_fields = fields # Bu serializer faqat o'qish uchun
+
+    def get_status_display(self, obj):
+        # Rasmdagi statuslarga moslashtirish
+        if obj.is_active:
+            return "Faol" # Tasdiqlangan
+        else:
+            # Bu yerda "Faol emas" (rad etilgan) va "Kutilmoqda" (yangi) ni farqlash kerak bo'lishi mumkin
+            # Hozircha faqat is_active ga qaraymiz
+            return "Kutilmoqda" # Yoki "Faol emas"
+
+    def get_date_joined_display(self, obj):
+        # Sanani 'YYYY-MM-DD' formatida qaytarish
+        return date_format(obj.date_joined, format='Y-m-d', use_l10n=False) # use_l10n=False muhim
+
+    def get_img_url(self, obj):
+        request = self.context.get('request')
+        if obj.img and hasattr(obj.img, 'url'):
+             if request:
+                 return request.build_absolute_uri(obj.img.url)
+             return obj.img.url
+        return None # Rasm yo'q bo'lsa
+
+class UserManagementStatsSerializer(serializers.Serializer):
+    """
+    Foydalanuvchilarni boshqarish sahifasi uchun statistika.
+    """
+    mijozlar_soni = serializers.IntegerField()
+    buxgalterlar_soni = serializers.IntegerField()
+    yangi_foydalanuvchilar_soni = serializers.IntegerField() # Tasdiqlashni kutayotganlar
+
+
+class IncomeStatsSerializer(serializers.Serializer):
+    """
+    Daromadlar sahifasining yuqori qismi uchun statistika.
+    """
+    oylik_daromad = serializers.DecimalField(max_digits=15, decimal_places=2)
+    oylik_foiz_ozgarish = serializers.FloatField() # Foiz o'zgarish
+    yillik_daromad = serializers.DecimalField(max_digits=15, decimal_places=2)
+    yillik_foiz_ozgarish = serializers.FloatField()
+    kutilayotgan_daromad_summa = serializers.DecimalField(max_digits=15, decimal_places=2)
+    kutilayotgan_daromad_soni = serializers.IntegerField()
+
+# Dinamika uchun alohida serializer shart emas, viewda list/dict qaytarishimiz mumkin
+class PaymentSerializer(serializers.ModelSerializer):
+    """
+    To'lovlar ro'yxati va detali uchun serializer.
+    """
+    client = MiniUserSerializer(read_only=True) # Mijoz ma'lumotlari
+    accountant = MiniUserSerializer(read_only=True, allow_null=True) # Buxgalter ma'lumotlari
+    report_title = serializers.CharField(source='report.title', read_only=True, default='N/A') # Hisobot nomi
+    payment_date_display = serializers.SerializerMethodField(read_only=True) # Formatlangan sana
+    status_display = serializers.CharField(source='get_status_display', read_only=True) # Status nomi
+    # Jadval uchun "Xizmat turi" ni report.category.name dan olish
+    xizmat_turi = serializers.CharField(source='report.category.name', read_only=True, default='Noma\'lum')
+
+    # Agar Admin qo'lda Payment yaratishi/o'zgartirishi kerak bo'lsa:
+    client_id = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(role='mijoz'), source='client', write_only=True, required=True)
+    report_id = serializers.PrimaryKeyRelatedField(queryset=Report.objects.all(), source='report', write_only=True, required=False, allow_null=True)
+    accountant_id = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(role='buxgalter'), source='accountant', write_only=True, required=False, allow_null=True)
+
+    class Meta:
+        model = Payment
+        fields = [
+            'id', 'client', 'client_id', 'accountant', 'accountant_id',
+            'report', 'report_id', 'report_title', 'xizmat_turi', # report va xizmat turi qo'shildi
+            'amount', 'status', 'status_display',
+            'payment_date', 'payment_date_display',
+            'payment_method', 'transaction_id',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'client', 'accountant', 'report_title', 'xizmat_turi',
+            'status_display', 'payment_date_display', 'created_at', 'updated_at',
+            'report' # Read-only qilsak, faqat ID ko'rinadi, bog'langan obyekt emas
+        ]
+        # Yaratish/O'zgartirish uchun kerakli maydonlar
+        extra_kwargs = {
+            'amount': {'required': True},
+            'status': {'required': False}, # Default 'pending'
+            'payment_date': {'required': False}, # Default timezone.now()
+        }
+
+    def get_payment_date_display(self, obj):
+        # Sanani kerakli formatda qaytarish (vaqt bilan yoki vaqtsiz)
+        return date_format(obj.payment_date, format='Y-m-d H:i', use_l10n=False)
+
+# class PaymentHistorySerializer(serializers.ModelSerializer):
+#     """
+#     To'lovlar tarixi jadvali uchun serializer (Report modelidan olingan).
+#     """
+#     mijoz_nomi = serializers.CharField(source='client.full_name', read_only=True)
+#     xizmat_turi = serializers.CharField(source='category.name', read_only=True, default='Noma\'lum') # Agar category null bo'lsa
+#     sana = serializers.SerializerMethodField(read_only=True)
+#     summa = serializers.DecimalField(source='category.price', max_digits=10, decimal_places=2, read_only=True, default=Decimal('0.00')) # Agar category null bo'lsa
+#     status_display = serializers.SerializerMethodField(read_only=True)
+
+#     class Meta:
+#         model = Report # Asosiy model Report
+#         fields = [
+#             'id', # Report IDsi
+#             'mijoz_nomi',
+#             'xizmat_turi',
+#             'sana',
+#             'summa',
+#             'status', # Original status (filterlash uchun kerak bo'lishi mumkin)
+#             'status_display' # Ko'rsatish uchun status
+#         ]
+#         read_only_fields = fields
+
+#     def get_sana(self, obj):
+#         # Tasdiqlangan bo'lsa, updated_at ni olamiz, aks holda created_at ni
+#         # Yoki har doim created_at ni ko'rsatish mumkin
+#         # return date_format(obj.updated_at if obj.status == 'approved' else obj.created_at, format='Y-m-d', use_l10n=False)
+#         return date_format(obj.created_at, format='Y-m-d', use_l10n=False) # Yaratilgan sanani ko'rsatamiz
+
+#     def get_status_display(self, obj):
+#         if obj.status == 'approved':
+#             return "To'langan"
+#         elif obj.status in ['submitted', 'in_review', 'draft']: # Yoki boshqa kutilayotgan statuslar
+#             return "Kutilmoqda"
+#         elif obj.status == 'rejected':
+#             return "Rad etilgan" # Jadvalda ko'rsatilmaydi, lekin bo'lishi mumkin
+#         else:
+#             return obj.get_status_display() # Modelning standart statusi

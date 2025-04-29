@@ -1,7 +1,9 @@
 import uuid
 from django.db import models
 from django.conf import settings # User modelini olish uchun
+from django.utils import timezone
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from decimal import Decimal
 
 # --- User va Accountant modellari (o'zgarishsiz qoldiriladi) ---
 class UserManager(BaseUserManager):
@@ -32,11 +34,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     phone_number = models.CharField(max_length=15, unique=True)
     full_name = models.CharField(max_length=255)
     img = models.ImageField(upload_to='user_images/', blank=True, null=True)
+    date_joined = models.DateTimeField(default=timezone.now) # Qachon qo'shilganini saqlash uchun
 
     # Mijozlar uchun
     company_name = models.CharField(max_length=255, blank=True, null=True)
     stir = models.CharField(max_length=20, blank=True, null=True)
-
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='mijoz')
 
     is_active = models.BooleanField(default=True)
@@ -76,11 +78,11 @@ class ReportType(models.Model):
 # --- Report modelini TZ ga moslash ---
 class Report(models.Model):
     STATUS_CHOICES = [
-        ('draft', 'Qoralama'),         # TZ: draft
-        ('submitted', 'Yuborilgan'),   # TZ: submitted
+        ('draft', 'Yangi'),         # TZ: draft
+        ('in_progress', 'Jarayonda'),   # TZ: submitted
         ('in_review', 'Ko‘rib chiqilmoqda'), # TZ: in_review
-        ('approved', 'Tasdiqlandi'),    # TZ: approved
-        ('rejected', 'Rad etildi'),     # TZ: rejected
+        ('approved', 'Tayyor'),    # TZ: approved
+        ('rejected', 'Bekor qilingan'),     # TZ: rejected
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False) # TZ: string/uuid
@@ -222,6 +224,7 @@ class Message(models.Model):
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_messages')
     message = models.TextField()
+    read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -246,7 +249,64 @@ class AboutUs(models.Model):
     def __str__(self):
         return self.title
 
+class Payment(models.Model):
+    """
+    Amalga oshirilgan yoki kutilayotgan to'lovlar uchun model.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Kutilmoqda'),      # To'lov boshlangan, lekin tasdiqlanmagan
+        ('completed', 'Bajarildi'),     # To'lov muvaffaqiyatli amalga oshdi (bu daromad)
+        ('failed', 'Xatolik'),         # To'lovda xatolik yuz berdi
+        ('refunded', 'Qaytarildi'),     # To'lov qaytarildi
+    ]
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Qaysi hisobot uchun to'lov (agar bog'liq bo'lsa)
+    report = models.ForeignKey(Report, on_delete=models.SET_NULL, null=True, blank=True, related_name='payments')
+    # Kim to'ladi (Mijoz)
+    client = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='payments_made', limit_choices_to={'role': 'mijoz'})
+    # Kim qabul qildi (Buxgalter - daromadni kuzatish uchun)
+    accountant = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='payments_received', limit_choices_to={'role': 'buxgalter'})
+    # To'lov summasi
+    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    # To'lov statusi
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='pending')
+    # To'lov sanasi (status 'completed' bo'lganda o'rnatilishi mumkin)
+    payment_date = models.DateTimeField(default=timezone.now) # Yoki null=True, blank=True
+    # To'lov usuli (ixtiyoriy)
+    payment_method = models.CharField(max_length=50, blank=True, null=True)
+    # To'lov tizimidan kelgan ID (ixtiyoriy)
+    transaction_id = models.CharField(max_length=100, blank=True, null=True, unique=True) # unique=True agar IDlar noyob bo'lsa
+    # Yaratilgan va yangilangan vaqtlar
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        client_name = self.client.full_name if self.client else 'Noma\'lum mijoz'
+        return f"To'lov {self.id} - {client_name} - {self.amount} ({self.get_status_display()})"
+
+    class Meta:
+        ordering = ['-payment_date'] # Oxirgi to'lovlar tepada
+
+    # Agar report tasdiqlanganda avtomatik Payment yaratish kerak bo'lsa,
+    # Report modelining save() metodini yoki signallarni ishlatish mumkin.
+    # Misol uchun, Report.save() ichida:
+    # if self.status == 'approved' and not hasattr(self, '_processing_approval'):
+    #     self._processing_approval = True # Qayta chaqiruvni oldini olish
+    #     # Payment mavjudligini tekshirish
+    #     existing_payment = Payment.objects.filter(report=self, status='completed').first()
+    #     if not existing_payment and self.category and self.category.price > 0:
+    #         Payment.objects.create(
+    #             report=self,
+    #             client=self.client,
+    #             accountant=self.accountant,
+    #             amount=self.category.price, # Yoki hisobotning o'zidan summa olish
+    #             status='completed',
+    #             payment_date=timezone.now() # Tasdiqlangan vaqt
+    #             # Boshqa kerakli maydonlar
+    #         )
+    #     # finally:
+    #     #     del self._processing_approval # Ishlovdan keyin o'chirish
 
 class AccountingService(models.Model):
     title = models.CharField(max_length=200)
@@ -265,26 +325,4 @@ class ServiceItem(models.Model):
 
     def __str__(self):
         return f"{self.service.title} - {self.name}"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

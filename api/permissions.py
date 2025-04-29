@@ -276,7 +276,7 @@ class CanManageComment(permissions.BasePermission):
 
         # DELETE (destroy)
         if view.action == 'destroy':
-             # Muallif yoki Admin o'chira oladi
+             # Mu   allif yoki Admin o'chira oladi
             return is_author or is_admin
 
         return False

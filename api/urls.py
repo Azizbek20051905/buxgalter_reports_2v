@@ -17,6 +17,8 @@ router.register(r'aboutus', AboutUsViewSet, basename='aboutus') # About Us (Admi
 router.register(r'chats', ChatViewSet, basename='chats') # Chatlar ro'yxati (ReadOnly)
 router.register(r'admin-chats', AdminChatViewSet, basename='admin-chats') # Admin uchun chatlar
 router.register(r'services', AccountingServiceViewSet) # Xizmatlar
+# router.register(r'payments', PaymentHistoryViewSet, basename='payment-history') # To'lovlar tarixi (Admin)
+router.register(r'payments', PaymentViewSet, basename='payment-history') # To'lovlar tarixi (Admin)
 
 # Hisobotlar uchun nested router (Attachments va Comments)
 reports_router = routers.NestedDefaultRouter(router, r'reports', lookup='report')
@@ -37,6 +39,9 @@ urlpatterns = [
     # URL tuzilishi TZ ga moslashtirildi (uid/token parametr sifatida)
     # Frontend bu URL ni qayta ishlaydi, backendga faqat POST so'rov keladi
     path('auth/password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
+    path('dashboard/stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
+    path('users/management/stats/', UserManagementStatsView.as_view(), name='user-management-stats'),
+    path('income/summary-dynamics/', IncomeSummaryDynamicsView.as_view(), name='income-summary-dynamics'),
 
     # API endpointlar
     path('', include(router.urls)),
